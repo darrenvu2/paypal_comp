@@ -11,6 +11,7 @@ export type SplitInput = {
   assignments: Assignment[];
   taxCents: number;
   tipCents: number;
+  equalSplit?: boolean;
 };
 export type PersonLine = { name: string; cents: number };
 export type PersonTotal = {
@@ -42,17 +43,32 @@ export function allocate(amount: number, weights: number[]): number[] {
   return result;
 }
 
+/** Split cents in sequence across people so equal mode balances the whole bill. */
+function allocateEqual(amount: number, count: number, startIndex: number) {
+  const result = Array(count).fill(Math.floor(amount / count));
+  const leftover = amount % count;
+  for (let i = 0; i < leftover; i += 1) {
+    result[(startIndex + i) % count] += 1;
+  }
+  return { result, nextIndex: (startIndex + amount) % count };
+}
+
 export function computeTotals(input: SplitInput): PersonTotal[] {
-  const { items, assignments, taxCents, tipCents } = input;
+  const { items, assignments, taxCents, tipCents, equalSplit = false } = input;
   const byItem = new Map(assignments.map((a) => [a.itemId, a.people]));
   const people: string[] = [];
   const totals = new Map<string, PersonTotal>();
+  let equalCursor = 0;
 
   for (const item of items) {
     const who = byItem.get(item.id);
     if (!who || who.length === 0) throw new Error(`Item "${item.name}" is not assigned to anyone`);
     if (new Set(who).size !== who.length) throw new Error(`Item "${item.name}" lists a person twice`);
-    const shares = allocate(item.priceCents, who.map(() => 1));
+    const allocated = equalSplit
+      ? allocateEqual(item.priceCents, who.length, equalCursor)
+      : { result: allocate(item.priceCents, who.map(() => 1)), nextIndex: equalCursor };
+    const shares = allocated.result;
+    equalCursor = allocated.nextIndex;
     who.forEach((person, i) => {
       if (!totals.has(person)) {
         people.push(person);
@@ -65,8 +81,15 @@ export function computeTotals(input: SplitInput): PersonTotal[] {
   }
 
   const weights = people.map((p) => totals.get(p)!.itemsCents);
-  const taxShares = allocate(taxCents, weights);
-  const tipShares = allocate(tipCents, weights);
+  const taxAllocated = equalSplit
+    ? allocateEqual(taxCents, people.length, equalCursor)
+    : { result: allocate(taxCents, weights), nextIndex: equalCursor };
+  equalCursor = taxAllocated.nextIndex;
+  const tipAllocated = equalSplit
+    ? allocateEqual(tipCents, people.length, equalCursor)
+    : { result: allocate(tipCents, weights), nextIndex: equalCursor };
+  const taxShares = taxAllocated.result;
+  const tipShares = tipAllocated.result;
   people.forEach((p, i) => {
     const t = totals.get(p)!;
     t.taxCents = taxShares[i];

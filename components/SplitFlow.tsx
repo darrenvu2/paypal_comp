@@ -51,9 +51,12 @@ export default function SplitFlow() {
     { name: "Alex", email: "", isPayer: false },
   ]);
   const [assign, setAssign] = useState<Record<string, string[]>>({});
+  const [equalSplit, setEqualSplit] = useState(false);
   const [selected, setSelected] = useState(0);
   const [paid, setPaid] = useState<Record<string, boolean>>({});
   const [note, setNote] = useState("");
+  const [sending, setSending] = useState(false);
+  const [invoiceLinks, setInvoiceLinks] = useState<Record<string, string>>({});
 
   const subtotal = items.reduce((s, i) => s + i.priceCents, 0);
   const total = subtotal + taxCents + tipCents;
@@ -72,12 +75,12 @@ export default function SplitFlow() {
         itemId: i.id,
         people: (assign[i.id] ?? []).filter((n) => valid.has(n)),
       }));
-      return { totals: computeTotals({ items, assignments, taxCents, tipCents }) };
+      return { totals: computeTotals({ items, assignments, taxCents, tipCents, equalSplit }) };
     } catch (e) {
       return { error: (e as Error).message };
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [items, assign, taxCents, tipCents, people]);
+  }, [items, assign, taxCents, tipCents, people, equalSplit]);
 
   const payer = people.find((p) => p.isPayer)!;
   const owing = (result.totals ?? []).filter((t) => t.person !== payer.name.trim());
@@ -109,10 +112,42 @@ export default function SplitFlow() {
     setSelected(0);
     setStep(4);
   };
+  const sendInvoices = async () => {
+    setSending(true);
+    setNote("");
+    try {
+      const response = await fetch("/api/invoices", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          invoices: owing.map((t) => ({
+            recipientName: t.person,
+            recipientEmail: emailFor(t.person).trim(),
+            totalCents: t.totalCents,
+            lines: [
+              ...t.lines,
+              { name: "Tax (your share)", cents: t.taxCents },
+              { name: "Tip (your share)", cents: t.tipCents },
+            ],
+          })),
+        }),
+      });
+      const body = (await response.json()) as { error?: string; invoices?: { person: string; payerLink?: string }[] };
+      if (!response.ok) throw new Error(body.error ?? "Unable to send invoices.");
+      setInvoiceLinks(Object.fromEntries((body.invoices ?? []).filter((invoice) => invoice.payerLink).map((invoice) => [invoice.person, invoice.payerLink!])));
+      setStep(5);
+    } catch (error) {
+      setNote(error instanceof Error ? error.message : "Unable to send invoices.");
+    } finally {
+      setSending(false);
+    }
+  };
   const restart = () => {
     setStep(1);
     setAssign({});
+    setEqualSplit(false);
     setPaid({});
+    setInvoiceLinks({});
     setNote("");
   };
 
@@ -215,7 +250,36 @@ export default function SplitFlow() {
           />
         </div>
         <Card>
-          <Label>PEOPLE</Label>
+          <div className="flex items-center justify-between gap-3">
+            <Label>PEOPLE</Label>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={equalSplit}
+              aria-label="Split equally"
+              disabled={peopleError !== null || items.length === 0}
+              className={`relative h-7 w-12 shrink-0 rounded-full p-1 transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                equalSplit ? "bg-[#2188E8]" : "bg-slate-300"
+              }`}
+              onClick={() => {
+                if (equalSplit) {
+                  setEqualSplit(false);
+                  setAssign({});
+                } else {
+                  setEqualSplit(true);
+                  setAssign(Object.fromEntries(items.map((item) => [item.id, names.filter(Boolean)])));
+                }
+              }}
+            >
+              <span
+                aria-hidden="true"
+                className={`block h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${
+                  equalSplit ? "translate-x-5" : "translate-x-0"
+                }`}
+              />
+            </button>
+          </div>
+          <div className="mb-1 text-right text-xs text-slate-500">Split equally</div>
           {people.map((p, i) => (
             <div key={i} className="flex items-center gap-2 border-b border-slate-200 py-2 last:border-b-0">
               <input
@@ -271,7 +335,7 @@ export default function SplitFlow() {
                     key={n}
                     tone={(assign[it.id] ?? []).includes(n) ? "solid" : "blue"}
                     pressed={(assign[it.id] ?? []).includes(n)}
-                    onClick={() => toggle(it.id, n)}
+                    onClick={equalSplit ? undefined : () => toggle(it.id, n)}
                   >
                     {n || "?"}
                   </Chip>
@@ -343,12 +407,10 @@ export default function SplitFlow() {
         footer={
           <>
             <Button
-              onClick={() => {
-                // TODO: POST each invoice to the PayPal Invoicing API (see scripts/paypal-invoice-test.ts).
-                setStep(5);
-              }}
+              onClick={sendInvoices}
+              disabled={sending}
             >
-              Send {owing.length} invoice{owing.length === 1 ? "" : "s"}
+              {sending ? "Sending…" : `Send ${owing.length} invoice${owing.length === 1 ? "" : "s"}`}
             </Button>
             <Button secondary onClick={() => setStep(3)}>
               Back to totals
@@ -413,7 +475,19 @@ export default function SplitFlow() {
       </div>
       <Card>
         {owing.map((t) => (
-          <Row key={t.person} title={t.person} value={fmt(t.totalCents)} />
+          <div key={t.person}>
+            <Row key={t.person} title={t.person} value={fmt(t.totalCents)} />
+            {invoiceLinks[t.person] && (
+              <a
+                href={invoiceLinks[t.person]}
+                target="_blank"
+                rel="noreferrer"
+                className="-mt-1 mb-2 block text-xs font-semibold text-[#0B3FA8]"
+              >
+                Open PayPal invoice
+              </a>
+            )}
+          </div>
         ))}
       </Card>
       <div className="flex flex-wrap gap-2">
@@ -424,7 +498,7 @@ export default function SplitFlow() {
         ))}
       </div>
       <p className="m-0 text-[13px] leading-normal text-slate-600">
-        Demo mode: invoices are not actually sent to PayPal yet, and payments are recorded by hand.
+        Payments are recorded by hand for now; PayPal invoice links are live Sandbox links.
       </p>
     </Screen>
   );
