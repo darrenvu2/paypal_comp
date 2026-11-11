@@ -32,6 +32,7 @@ const lines = [
 ];
 const totalCents = lines.reduce((sum, l) => sum + l.cents, 0);
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function paypal<T = any>(path: string, token: string, init: RequestInit = {}): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     ...init,
