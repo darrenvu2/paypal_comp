@@ -2,38 +2,18 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { computeTotals, type Item } from "@/lib/totals";
-import { dollars, fmt, parseCents } from "@/lib/money";
-import { Button, Card, Chip, Label, Row, Screen, inputCls } from "./ui";
-
-type Person = { name: string; email: string; isPayer: boolean };
+import { fmt } from "@/lib/money";
+import { Button, Card, Chip, Row, Screen } from "./ui";
+import { ReceiptReview } from "./receipt/ReceiptReview";
+import { PeopleAssignment, type Person } from "./people/PeopleAssignment";
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-/** Text input that edits dollars and commits integer cents on blur. */
-function MoneyInput({ cents, onCommit, label }: { cents: number; onCommit: (c: number) => void; label: string }) {
-  const [text, setText] = useState(dollars(cents));
-  return (
-    <input
-      aria-label={label}
-      inputMode="decimal"
-      className={`${inputCls} w-20 text-right`}
-      value={text}
-      onChange={(e) => setText(e.target.value)}
-      onBlur={() => {
-        const c = parseCents(text);
-        if (c === null) setText(dollars(cents));
-        else {
-          onCommit(c);
-          setText(dollars(c));
-        }
-      }}
-    />
-  );
-}
 
 export default function SplitFlow() {
   const [step, setStep] = useState(1);
   const [startMode, setStartMode] = useState<"choice" | "camera" | "manual">("choice");
+  const [manualTotalOnly, setManualTotalOnly] = useState(false);
+  const [manualTotalCents, setManualTotalCents] = useState(0);
   const [items, setItems] = useState<Item[]>([]);
   const [receiptImageUrl, setReceiptImageUrl] = useState<string | null>(null);
   const [receiptTotalCents, setReceiptTotalCents] = useState(0);
@@ -45,7 +25,7 @@ export default function SplitFlow() {
   const [taxCents, setTax] = useState(0);
   const [tipCents, setTip] = useState(0);
   const [people, setPeople] = useState<Person[]>([
-    { name: "You", email: "", isPayer: true },
+    { name: "Me", email: "", isPayer: true },
   ]);
   const [assign, setAssign] = useState<Record<string, string[]>>({});
   const [equalSplit, setEqualSplit] = useState(false);
@@ -59,6 +39,7 @@ export default function SplitFlow() {
   const total = subtotal + taxCents + tipCents;
   const taxPercentage = subtotal > 0 ? `${((taxCents / subtotal) * 100).toFixed(2)}%` : "—";
   const names = people.map((p) => p.name.trim());
+  const namedPeople = names.filter(Boolean);
   const peopleError = names.some((n) => !n)
     ? "Every person needs a name."
     : new Set(names).size !== names.length
@@ -191,6 +172,7 @@ export default function SplitFlow() {
   const retakeReceipt = () => {
     if (receiptImageUrl) URL.revokeObjectURL(receiptImageUrl);
     setStartMode("camera");
+    setManualTotalOnly(false);
     setParseError(null);
     setReceiptImageUrl(null);
   };
@@ -234,6 +216,8 @@ export default function SplitFlow() {
   const restart = () => {
     setStep(1);
     setStartMode("choice");
+    setManualTotalOnly(false);
+    setManualTotalCents(0);
     setReceiptImageUrl(null);
     setReceiptTotalCents(0);
     setParseError(null);
@@ -247,119 +231,64 @@ export default function SplitFlow() {
   // ---------- Step 1: review ----------
   if (step === 1)
     return (
-      <Screen
-        step={1}
-        title="Start splitting"
-        footer={
-          startMode === "manual" || receiptImageUrl ? (
-            <>
-              <Button onClick={() => setStep(2)} disabled={items.length === 0}>
-                Looks right
-              </Button>
-              <Button secondary onClick={() => setItems((i) => [...i, { id: crypto.randomUUID(), name: "New item", priceCents: 0 }])}>
-                Add item
-              </Button>
-            </>
-          ) : null
-        }
-      >
-        {startMode === "choice" && (
-          <Card>
-            <Label>CHOOSE HOW TO START</Label>
-            <div className="flex flex-col gap-3 py-4">
-              <button type="button" onClick={() => setStartMode("camera")} className="rounded-xl bg-[#0B3FA8] px-4 py-4 text-base font-semibold text-white">
-                Scan receipt
-              </button>
-              <button type="button" onClick={() => setStartMode("manual")} className="rounded-xl border border-[#0B3FA8] px-4 py-4 text-base font-semibold text-[#0B3FA8]">
-                No receipt — enter manually
-              </button>
-            </div>
-          </Card>
-        )}
-        {(startMode === "camera" || receiptImageUrl) && (
-        <Card>
-          <Label>START HERE</Label>
-          {receiptImageUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={receiptImageUrl} alt="Receipt preview" className="mt-2 max-h-64 w-full rounded-xl object-contain" />
-          ) : cameraError ? (
-            <p className="m-0 mt-2 text-sm text-slate-600">{cameraError}</p>
-          ) : (
-            <video ref={videoRef} autoPlay muted playsInline className="mt-2 aspect-[4/3] w-full rounded-xl bg-slate-900 object-cover" />
-          )}
-          {parsing && <p className="m-0 mt-2 text-sm text-slate-600">Gemini is reading your receipt…</p>}
-          {parseError && <p className="m-0 mt-2 text-sm text-red-700">{parseError}</p>}
-          <div className="mt-3 flex gap-2">
-            {receiptImageUrl ? (
-              <button type="button" onClick={retakeReceipt} className="flex-1 rounded-xl border border-[#0B3FA8] px-3 py-3 text-sm font-semibold text-[#0B3FA8]">
-                Retake photo
-              </button>
-            ) : (
-              <button type="button" onClick={captureReceipt} disabled={!!cameraError} className="flex-1 rounded-xl bg-[#0B3FA8] px-3 py-3 text-sm font-semibold text-white disabled:opacity-50">
-                Capture receipt
-              </button>
-            )}
-            <label htmlFor="receipt-image" className="cursor-pointer rounded-xl border border-slate-300 px-3 py-3 text-sm font-semibold text-slate-700">
-              Upload
-            </label>
-          </div>
-          <input id="receipt-image" type="file" accept="image/*" capture="environment" className="sr-only" onChange={(event) => handleReceiptImage(event.target.files?.[0])} />
-        </Card>
-        )}
-        {(startMode === "manual" || receiptImageUrl) && (
-          <>
-        <Card>
-          {items.length === 0 && <p className="py-4 text-sm text-slate-600">No items yet. Scan a receipt or add an item below.</p>}
-          {items.map((it) => (
-            <div key={it.id} className="flex items-center justify-between gap-2 border-b border-slate-200 py-2.5 last:border-b-0">
-              <input
-                aria-label="Item name"
-                className={`${inputCls} flex-1`}
-                value={it.name}
-                onChange={(e) => setItems((l) => l.map((x) => (x.id === it.id ? { ...x, name: e.target.value } : x)))}
-              />
-              <span className="text-slate-600">$</span>
-              <MoneyInput
-                key={`${it.id}-${it.priceCents}`}
-                label={`${it.name} price`}
-                cents={it.priceCents}
-                onCommit={(c) => setItems((l) => l.map((x) => (x.id === it.id ? { ...x, priceCents: c } : x)))}
-              />
-              <button
-                type="button"
-                aria-label={`Remove ${it.name}`}
-                className="px-1 text-lg text-slate-500"
-                onClick={() => setItems((l) => l.filter((x) => x.id !== it.id))}
-              >
-                ×
-              </button>
-            </div>
-          ))}
-        </Card>
-        <Card>
-          <Row title="Subtotal" value={fmt(subtotal)} />
-          <div className="flex items-center justify-between border-b border-slate-200 py-2.5">
-            <span className="text-[15px]">Tax ({taxPercentage})</span>
-            <MoneyInput key={`tax-${taxCents}`} label="Tax" cents={taxCents} onCommit={setTax} />
-          </div>
-          <div className="flex items-center justify-between border-b border-slate-200 py-2.5">
-            <span className="text-[15px]">Tip</span>
-            <MoneyInput key={`tip-${tipCents}`} label="Tip" cents={tipCents} onCommit={setTip} />
-          </div>
-          <Row title="Total" value={fmt(total)} bold />
-        </Card>
-        <div>
-          {items.length > 0 && total === receiptTotalCents ? (
-            <Chip tone="green">Items + tax + tip match receipt total</Chip>
-          ) : items.length === 0 ? (
-            <Chip tone="blue">Add items to get started</Chip>
-          ) : (
-            <Chip tone="amber">Doesn’t match receipt total of {fmt(receiptTotalCents)}</Chip>
-          )}
-        </div>
-          </>
-        )}
-      </Screen>
+      <ReceiptReview
+        startMode={startMode}
+        receiptImageUrl={receiptImageUrl}
+        manualTotalOnly={manualTotalOnly}
+        manualTotalCents={manualTotalCents}
+        items={items}
+        taxCents={taxCents}
+        tipCents={tipCents}
+        subtotal={subtotal}
+        total={total}
+        taxPercentage={taxPercentage}
+        receiptTotalCents={receiptTotalCents}
+        parsing={parsing}
+        parseError={parseError}
+        cameraError={cameraError}
+        videoRef={videoRef}
+        onStartCamera={() => setStartMode("camera")}
+        onStartManual={() => {
+          setStartMode("manual");
+          setManualTotalOnly(false);
+          setManualTotalCents(0);
+          setReceiptImageUrl(null);
+          setItems([]);
+          setTax(0);
+          setTip(0);
+          setReceiptTotalCents(0);
+        }}
+        onCapture={captureReceipt}
+        onUpload={handleReceiptImage}
+        onRetake={retakeReceipt}
+        onManualTotalToggle={() => {
+          if (manualTotalOnly) {
+            setManualTotalOnly(false);
+            setManualTotalCents(0);
+            setItems([]);
+            setTax(0);
+            setTip(0);
+          } else {
+            const currentTotal = subtotal + taxCents + tipCents;
+            setManualTotalOnly(true);
+            setManualTotalCents(currentTotal);
+            setItems([{ id: "manual-total", name: "Bill total", priceCents: currentTotal }]);
+            setTax(0);
+            setTip(0);
+          }
+        }}
+        onManualTotalCommit={(cents) => {
+          setManualTotalCents(cents);
+          setItems([{ id: "manual-total", name: "Bill total", priceCents: cents }]);
+        }}
+        onItemNameChange={(id, name) => setItems((list) => list.map((item) => (item.id === id ? { ...item, name } : item)))}
+        onItemPriceChange={(id, cents) => setItems((list) => list.map((item) => (item.id === id ? { ...item, priceCents: cents } : item)))}
+        onRemoveItem={(id) => setItems((list) => list.filter((item) => item.id !== id))}
+        onTaxChange={setTax}
+        onTipChange={setTip}
+        onAddItem={() => setItems((list) => [...list, { id: crypto.randomUUID(), name: "New item", priceCents: 0 }])}
+        onContinue={() => setStep(2)}
+      />
     );
 
   // ---------- Step 2: assign ----------
@@ -394,106 +323,29 @@ export default function SplitFlow() {
             className="mt-1.5 w-full resize-none bg-transparent text-[15px] outline-none"
           />
         </div>
-        <Card>
-          <div className="flex items-center justify-between gap-3">
-            <Label>PEOPLE ({people.length})</Label>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={equalSplit}
-              aria-label="Split equally"
-              disabled={peopleError !== null || items.length === 0}
-              className={`relative h-7 w-12 shrink-0 rounded-full p-1 transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-                equalSplit ? "bg-[#2188E8]" : "bg-slate-300"
-              }`}
-              onClick={() => {
-                if (equalSplit) {
-                  setEqualSplit(false);
-                  setAssign({});
-                } else {
-                  setEqualSplit(true);
-                  setAssign(Object.fromEntries(items.map((item) => [item.id, names.filter(Boolean)])));
-                }
-              }}
-            >
-              <span
-                aria-hidden="true"
-                className={`block h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${
-                  equalSplit ? "translate-x-5" : "translate-x-0"
-                }`}
-              />
-            </button>
-          </div>
-          <div className="mb-1 text-right text-xs text-slate-500">Split equally</div>
-          {people.map((p, i) => (
-            <div key={i} className="flex items-center gap-2 border-b border-slate-200 py-2 last:border-b-0">
-              <input
-                aria-label="Name"
-                className={`${inputCls} w-24 font-semibold`}
-                value={p.name}
-                onChange={(e) => setPeople((l) => l.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))}
-              />
-              {p.isPayer ? (
-                <span className="text-sm text-slate-600">paid the bill</span>
-              ) : (
-                <>
-                  <input
-                    aria-label={`${p.name} email`}
-                    type="email"
-                    placeholder="PayPal email"
-                    className={`${inputCls} flex-1 text-sm`}
-                    value={p.email}
-                    onChange={(e) => setPeople((l) => l.map((x, j) => (j === i ? { ...x, email: e.target.value } : x)))}
-                  />
-                  <button
-                    type="button"
-                    aria-label={`Remove ${p.name || "person"}`}
-                    className="shrink-0 px-1 text-lg text-slate-500"
-                    onClick={() => removePerson(i)}
-                  >
-                    ×
-                  </button>
-                </>
-              )}
-            </div>
-          ))}
-          <div className="py-2">
-            <button
-              type="button"
-              className="text-sm font-semibold text-[#0B3FA8]"
-              onClick={() => setPeople((l) => [...l, { name: "", email: "", isPayer: false }])}
-            >
-              + Add person
-            </button>
-          </div>
-        </Card>
-        <Card>
-          {items.map((it) => (
-            <div key={it.id} className="border-b border-slate-200 py-3 last:border-b-0">
-              <div className="mb-2 flex justify-between text-[15px]">
-                <span>{it.name}</span>
-                <span>{fmt(it.priceCents)}</span>
-              </div>
-              <div className="flex flex-wrap gap-1.5">
-                {names.map((n) => (
-                  <Chip
-                    key={n}
-                    tone={(assign[it.id] ?? []).includes(n) ? "solid" : "blue"}
-                    pressed={(assign[it.id] ?? []).includes(n)}
-                    onClick={equalSplit ? undefined : () => toggle(it.id, n)}
-                  >
-                    {n || "?"}
-                  </Chip>
-                ))}
-              </div>
-            </div>
-          ))}
-        </Card>
-        <div>
-          <Chip tone={assigned === items.length ? "green" : "blue"}>
-            {assigned} of {items.length} items assigned
-          </Chip>
-        </div>
+        <PeopleAssignment
+          people={people}
+          namedPeople={namedPeople}
+          items={items}
+          assign={assign}
+          equalSplit={equalSplit}
+          peopleError={peopleError}
+          onToggleEqualSplit={() => {
+            if (equalSplit) {
+              setEqualSplit(false);
+              setAssign({});
+            } else {
+              setEqualSplit(true);
+              setAssign(Object.fromEntries(items.map((item) => [item.id, names.filter(Boolean)])));
+            }
+          }}
+          onNameChange={(index, name) => setPeople((list) => list.map((person, personIndex) => (personIndex === index ? { ...person, name } : person)))}
+          onEmailChange={(index, email) => setPeople((list) => list.map((person, personIndex) => (personIndex === index ? { ...person, email } : person)))}
+          onRemovePerson={removePerson}
+          onAddPerson={() => setPeople((list) => [...list, { name: "", email: "", isPayer: false }])}
+          onToggleItem={toggle}
+          assignedCount={assigned}
+        />
       </Screen>
     );
   }
