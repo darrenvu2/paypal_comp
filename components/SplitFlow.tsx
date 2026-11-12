@@ -45,6 +45,9 @@ export default function SplitFlow() {
   const [startMode, setStartMode] = useState<"choice" | "camera" | "manual">("choice");
   const [items, setItems] = useState<Item[]>(SAMPLE_ITEMS);
   const [receiptImageUrl, setReceiptImageUrl] = useState<string | null>(null);
+  const [receiptTotalCents, setReceiptTotalCents] = useState(RECEIPT_TOTAL);
+  const [parsing, setParsing] = useState(false);
+  const [parseError, setParseError] = useState<string | null>(null);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -111,10 +114,45 @@ export default function SplitFlow() {
   const emailFor = (name: string) => people.find((p) => p.name.trim() === name)?.email ?? "";
   const badEmail = owing.find((t) => !EMAIL.test(emailFor(t.person).trim()));
 
+  const parseReceipt = async (file: File) => {
+    setParsing(true);
+    setParseError(null);
+    try {
+      const imageBase64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result).split(",")[1] ?? "");
+        reader.onerror = () => reject(new Error("Could not read the receipt image."));
+        reader.readAsDataURL(file);
+      });
+      const response = await fetch("/api/receipt/parse", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ imageBase64, mediaType: file.type }),
+      });
+      const body = (await response.json()) as {
+        error?: string;
+        items?: Item[];
+        taxCents?: number;
+        tipCents?: number;
+        totalCents?: number;
+      };
+      if (!response.ok) throw new Error(body.error ?? "Claude could not read the receipt.");
+      setItems((body.items ?? []).map((item, index) => ({ ...item, id: String(index + 1) })));
+      setTax(body.taxCents ?? 0);
+      setTip(body.tipCents ?? 0);
+      setReceiptTotalCents(body.totalCents ?? 0);
+    } catch (error) {
+      setParseError(error instanceof Error ? error.message : "Claude could not read the receipt.");
+    } finally {
+      setParsing(false);
+    }
+  };
+
   const handleReceiptImage = (file: File | undefined) => {
     if (!file || !file.type.startsWith("image/")) return;
     setStartMode("manual");
     setReceiptImageUrl(URL.createObjectURL(file));
+    void parseReceipt(file);
   };
 
   useEffect(() => {
@@ -152,8 +190,10 @@ export default function SplitFlow() {
     canvas.getContext("2d")?.drawImage(video, 0, 0);
     canvas.toBlob((blob) => {
       if (blob) {
+        const file = new File([blob], "receipt.jpg", { type: "image/jpeg" });
         setStartMode("manual");
         setReceiptImageUrl(URL.createObjectURL(blob));
+        void parseReceipt(file);
       }
     }, "image/jpeg", 0.92);
   };
@@ -161,6 +201,7 @@ export default function SplitFlow() {
   const retakeReceipt = () => {
     if (receiptImageUrl) URL.revokeObjectURL(receiptImageUrl);
     setStartMode("camera");
+    setParseError(null);
     setReceiptImageUrl(null);
   };
 
@@ -204,6 +245,8 @@ export default function SplitFlow() {
     setStep(1);
     setStartMode("choice");
     setReceiptImageUrl(null);
+    setReceiptTotalCents(RECEIPT_TOTAL);
+    setParseError(null);
     setAssign({});
     setEqualSplit(false);
     setPaid({});
@@ -254,6 +297,8 @@ export default function SplitFlow() {
           ) : (
             <video ref={videoRef} autoPlay muted playsInline className="mt-2 aspect-[4/3] w-full rounded-xl bg-slate-900 object-cover" />
           )}
+          {parsing && <p className="m-0 mt-2 text-sm text-slate-600">Gemini is reading your receipt…</p>}
+          {parseError && <p className="m-0 mt-2 text-sm text-red-700">{parseError}</p>}
           <div className="mt-3 flex gap-2">
             {receiptImageUrl ? (
               <button type="button" onClick={retakeReceipt} className="flex-1 rounded-xl border border-[#0B3FA8] px-3 py-3 text-sm font-semibold text-[#0B3FA8]">
@@ -313,10 +358,10 @@ export default function SplitFlow() {
           <Row title="Total" value={fmt(total)} bold />
         </Card>
         <div>
-          {total === RECEIPT_TOTAL ? (
+          {total === receiptTotalCents ? (
             <Chip tone="green">Items + tax + tip match receipt total</Chip>
           ) : (
-            <Chip tone="amber">Doesn’t match receipt total of {fmt(RECEIPT_TOTAL)}</Chip>
+            <Chip tone="amber">Doesn’t match receipt total of {fmt(receiptTotalCents)}</Chip>
           )}
         </div>
           </>
