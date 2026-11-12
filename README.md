@@ -1,3 +1,6 @@
+#Demo Link
+Demo: https://paypal-comp.onrender.com 
+
 # SplitPay
 
 Snap a receipt, tell the app who ate what, and it sends each person a PayPal invoice for their exact share.
