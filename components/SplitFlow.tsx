@@ -7,15 +7,6 @@ import { Button, Card, Chip, Label, Row, Screen, inputCls } from "./ui";
 
 type Person = { name: string; email: string; isPayer: boolean };
 
-// Sample data until receipt parsing (AI) is wired in.
-const SAMPLE_ITEMS: Item[] = [
-  { id: "1", name: "Burger", priceCents: 1650 },
-  { id: "2", name: "Fries", priceCents: 600 },
-  { id: "3", name: "Nachos", priceCents: 1400 },
-  { id: "4", name: "Pitcher of beer", priceCents: 2200 },
-  { id: "5", name: "Side salad", priceCents: 1350 },
-];
-const RECEIPT_TOTAL = 9270;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /** Text input that edits dollars and commits integer cents on blur. */
@@ -43,20 +34,18 @@ function MoneyInput({ cents, onCommit, label }: { cents: number; onCommit: (c: n
 export default function SplitFlow() {
   const [step, setStep] = useState(1);
   const [startMode, setStartMode] = useState<"choice" | "camera" | "manual">("choice");
-  const [items, setItems] = useState<Item[]>(SAMPLE_ITEMS);
+  const [items, setItems] = useState<Item[]>([]);
   const [receiptImageUrl, setReceiptImageUrl] = useState<string | null>(null);
-  const [receiptTotalCents, setReceiptTotalCents] = useState(RECEIPT_TOTAL);
+  const [receiptTotalCents, setReceiptTotalCents] = useState(0);
   const [parsing, setParsing] = useState(false);
   const [parseError, setParseError] = useState<string | null>(null);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const [taxCents, setTax] = useState(630);
-  const [tipCents, setTip] = useState(1440);
+  const [taxCents, setTax] = useState(0);
+  const [tipCents, setTip] = useState(0);
   const [people, setPeople] = useState<Person[]>([
     { name: "You", email: "", isPayer: true },
-    { name: "Sam", email: "", isPayer: false },
-    { name: "Alex", email: "", isPayer: false },
   ]);
   const [assign, setAssign] = useState<Record<string, string[]>>({});
   const [equalSplit, setEqualSplit] = useState(false);
@@ -246,7 +235,7 @@ export default function SplitFlow() {
     setStep(1);
     setStartMode("choice");
     setReceiptImageUrl(null);
-    setReceiptTotalCents(RECEIPT_TOTAL);
+    setReceiptTotalCents(0);
     setParseError(null);
     setAssign({});
     setEqualSplit(false);
@@ -320,6 +309,7 @@ export default function SplitFlow() {
         {(startMode === "manual" || receiptImageUrl) && (
           <>
         <Card>
+          {items.length === 0 && <p className="py-4 text-sm text-slate-600">No items yet. Scan a receipt or add an item below.</p>}
           {items.map((it) => (
             <div key={it.id} className="flex items-center justify-between gap-2 border-b border-slate-200 py-2.5 last:border-b-0">
               <input
@@ -359,8 +349,10 @@ export default function SplitFlow() {
           <Row title="Total" value={fmt(total)} bold />
         </Card>
         <div>
-          {total === receiptTotalCents ? (
+          {items.length > 0 && total === receiptTotalCents ? (
             <Chip tone="green">Items + tax + tip match receipt total</Chip>
+          ) : items.length === 0 ? (
+            <Chip tone="blue">Add items to get started</Chip>
           ) : (
             <Chip tone="amber">Doesn’t match receipt total of {fmt(receiptTotalCents)}</Chip>
           )}
@@ -404,7 +396,7 @@ export default function SplitFlow() {
         </div>
         <Card>
           <div className="flex items-center justify-between gap-3">
-            <Label>PEOPLE</Label>
+            <Label>PEOPLE ({people.length})</Label>
             <button
               type="button"
               role="switch"
@@ -469,7 +461,7 @@ export default function SplitFlow() {
             <button
               type="button"
               className="text-sm font-semibold text-[#0B3FA8]"
-              onClick={() => setPeople((l) => [...l, { name: `Friend ${l.length}`, email: "", isPayer: false }])}
+              onClick={() => setPeople((l) => [...l, { name: "", email: "", isPayer: false }])}
             >
               + Add person
             </button>
