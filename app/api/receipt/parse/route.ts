@@ -50,6 +50,8 @@ export async function POST(request: Request) {
 Rules:
 - Convert every money value to integer US cents.
 - Include each purchased line item, but do not include subtotal, tax, tip, or total as an item.
+- Read the tax line carefully. It may be labeled Sales Tax, Tax, VAT, GST, or a similar tax label. Put that amount in taxCents.
+- Do not treat the subtotal as tax, and do not include tax inside an item price.
 - Use 0 when tax or tip is not shown.
 - Do not guess missing values. If the receipt is unreadable, return an empty items array and zero amounts.
  - Return no markdown, explanation, or code fence.` },
@@ -97,7 +99,15 @@ Rules:
       parsed.items.some((item) => !item.name || !Number.isInteger(item.priceCents) || item.priceCents < 0) ||
       !Number.isInteger(parsed.taxCents) || !Number.isInteger(parsed.tipCents) || !Number.isInteger(parsed.totalCents)
     ) return errorResponse("Gemini returned an invalid receipt format.", 502);
-    return Response.json(parsed);
+    const itemSubtotalCents = parsed.items.reduce((sum, item) => sum + item.priceCents, 0);
+    const impliedTaxCents = parsed.totalCents - itemSubtotalCents - parsed.tipCents;
+    const normalized = {
+      ...parsed,
+      // If Gemini misses a visible tax line but the receipt total proves an
+      // additional charge exists, preserve the receipt total instead of losing it.
+      taxCents: parsed.taxCents === 0 && impliedTaxCents > 0 ? impliedTaxCents : parsed.taxCents,
+    };
+    return Response.json(normalized);
   } catch (error) {
     console.error("Receipt parsing failed", error);
     return errorResponse(error instanceof Error && error.name === "TimeoutError" ? "Gemini timed out while reading the receipt." : "Gemini returned unreadable receipt data.", 502);

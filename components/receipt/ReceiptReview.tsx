@@ -1,4 +1,4 @@
-import type { RefObject } from "react";
+import { useEffect, useState, type RefObject } from "react";
 import { dollars, fmt, parseCents } from "@/lib/money";
 import type { Item } from "@/lib/totals";
 import { Button, Card, Chip, Label, Row, Screen, inputCls } from "../ui";
@@ -6,18 +6,25 @@ import { Button, Card, Chip, Label, Row, Screen, inputCls } from "../ui";
 type StartMode = "choice" | "camera" | "manual";
 
 function MoneyInput({ cents, onCommit, label }: { cents: number; onCommit: (c: number) => void; label: string }) {
+  const [text, setText] = useState(dollars(cents));
+
+  useEffect(() => {
+    setText(dollars(cents));
+  }, [cents]);
+
   return (
     <input
       aria-label={label}
       inputMode="decimal"
       className={`${inputCls} w-20 text-right`}
-      defaultValue={dollars(cents)}
-      onBlur={(event) => {
-        const parsed = parseCents(event.currentTarget.value);
-        if (parsed === null) event.currentTarget.value = dollars(cents);
+      value={text}
+      onChange={(event) => setText(event.target.value)}
+      onBlur={() => {
+        const parsed = parseCents(text);
+        if (parsed === null) setText(dollars(cents));
         else {
           onCommit(parsed);
-          event.currentTarget.value = dollars(parsed);
+          setText(dollars(parsed));
         }
       }}
     />
