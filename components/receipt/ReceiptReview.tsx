@@ -169,6 +169,9 @@ export function ReceiptReview({
           <div className="flex items-center justify-between py-4">
             <span className="text-[15px]">Bill total</span>
             <MoneyInput label="Bill total" cents={manualTotalCents} onCommit={onManualTotalCommit} />
+          </div>
+          <div className="flex items-center justify-between border-t border-slate-200 pt-3">
+            <span className="text-sm text-slate-600">Enter items instead</span>
             {manualTotalSwitch}
           </div>
         </Card>
@@ -198,14 +201,16 @@ export function ReceiptReview({
               <MoneyInput label="Tip" cents={tipCents} onCommit={onTipChange} />
             </div>
             {startMode === "manual" && !receiptImageUrl ? (
-              <div className="flex items-center justify-between gap-3 py-2.5">
-                <span className="font-semibold">Total</span>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-slate-600">Total only</span>
-                  {manualTotalSwitch}
+              <>
+                <div className="flex items-center justify-between gap-3 py-2.5">
+                  <span className="font-semibold">Total</span>
                   <span className="font-semibold">{fmt(total)}</span>
                 </div>
-              </div>
+                <div className="flex items-center justify-between border-t border-slate-200 pt-3">
+                  <span className="text-sm text-slate-600">Enter total only</span>
+                  {manualTotalSwitch}
+                </div>
+              </>
             ) : (
               <Row title="Total" value={fmt(total)} bold />
             )}
