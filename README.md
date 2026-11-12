@@ -16,4 +16,4 @@ Built for the "Build What's Next with PayPal and AI" hackathon.
 Upload receipt, AI parses items, user reviews, AI assigns items from a typed sentence, totals are computed in code, invoices are created and sent through the PayPal Invoicing API, and webhooks update the status board.
 
 ## Tools
-PayPal Invoicing API (sandbox), Next.js, TypeScript, Tailwind. AI model: to be added.
+PayPal Invoicing API (sandbox), Next.js, TypeScript, Tailwind. AI model: Gemini
