@@ -127,6 +127,7 @@ export default function SplitFlow() {
       const response = await fetch("/api/receipt/parse", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: AbortSignal.timeout(30_000),
         body: JSON.stringify({ imageBase64, mediaType: file.type }),
       });
       const body = (await response.json()) as {
@@ -142,7 +143,7 @@ export default function SplitFlow() {
       setTip(body.tipCents ?? 0);
       setReceiptTotalCents(body.totalCents ?? 0);
     } catch (error) {
-      setParseError(error instanceof Error ? error.message : "Claude could not read the receipt.");
+      setParseError(error instanceof Error && error.name === "TimeoutError" ? "Gemini took too long to respond. Check your API key and try again." : error instanceof Error ? error.message : "Gemini could not read the receipt.");
     } finally {
       setParsing(false);
     }
