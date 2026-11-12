@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { computeTotals, type Item } from "@/lib/totals";
 import { dollars, fmt, parseCents } from "@/lib/money";
 import { Button, Card, Chip, Label, Row, Screen, inputCls } from "./ui";
@@ -42,7 +42,12 @@ function MoneyInput({ cents, onCommit, label }: { cents: number; onCommit: (c: n
 
 export default function SplitFlow() {
   const [step, setStep] = useState(1);
+  const [startMode, setStartMode] = useState<"choice" | "camera" | "manual">("choice");
   const [items, setItems] = useState<Item[]>(SAMPLE_ITEMS);
+  const [receiptImageUrl, setReceiptImageUrl] = useState<string | null>(null);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
   const [taxCents, setTax] = useState(630);
   const [tipCents, setTip] = useState(1440);
   const [people, setPeople] = useState<Person[]>([
@@ -106,6 +111,59 @@ export default function SplitFlow() {
   const emailFor = (name: string) => people.find((p) => p.name.trim() === name)?.email ?? "";
   const badEmail = owing.find((t) => !EMAIL.test(emailFor(t.person).trim()));
 
+  const handleReceiptImage = (file: File | undefined) => {
+    if (!file || !file.type.startsWith("image/")) return;
+    setStartMode("manual");
+    setReceiptImageUrl(URL.createObjectURL(file));
+  };
+
+  useEffect(() => {
+    if (step !== 1 || startMode !== "camera" || receiptImageUrl) return;
+    let active = true;
+    setCameraError(null);
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setCameraError("Camera access is not available in this browser.");
+      return;
+    }
+    navigator.mediaDevices
+      .getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false })
+      .then((stream) => {
+        if (!active) {
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
+        streamRef.current = stream;
+        if (videoRef.current) videoRef.current.srcObject = stream;
+      })
+      .catch(() => setCameraError("Camera access was blocked. You can upload a receipt instead."));
+    return () => {
+      active = false;
+      streamRef.current?.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+    };
+  }, [step, startMode, receiptImageUrl]);
+
+  const captureReceipt = () => {
+    const video = videoRef.current;
+    if (!video || video.videoWidth === 0) return;
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext("2d")?.drawImage(video, 0, 0);
+    canvas.toBlob((blob) => {
+      if (blob) {
+        setStartMode("manual");
+        setReceiptImageUrl(URL.createObjectURL(blob));
+      }
+    }, "image/jpeg", 0.92);
+  };
+
+  const retakeReceipt = () => {
+    if (receiptImageUrl) URL.revokeObjectURL(receiptImageUrl);
+    setStartMode("camera");
+    setReceiptImageUrl(null);
+  };
+
   const goInvoices = () => {
     if (badEmail) return setNote(`Add a valid email for ${badEmail.person} to preview invoices.`);
     setNote("");
@@ -144,6 +202,8 @@ export default function SplitFlow() {
   };
   const restart = () => {
     setStep(1);
+    setStartMode("choice");
+    setReceiptImageUrl(null);
     setAssign({});
     setEqualSplit(false);
     setPaid({});
@@ -156,18 +216,63 @@ export default function SplitFlow() {
     return (
       <Screen
         step={1}
-        title="Review items"
+        title="Start splitting"
         footer={
-          <>
-            <Button onClick={() => setStep(2)} disabled={items.length === 0}>
-              Looks right
-            </Button>
-            <Button secondary onClick={() => setItems((i) => [...i, { id: crypto.randomUUID(), name: "New item", priceCents: 0 }])}>
-              Add item
-            </Button>
-          </>
+          startMode === "manual" || receiptImageUrl ? (
+            <>
+              <Button onClick={() => setStep(2)} disabled={items.length === 0}>
+                Looks right
+              </Button>
+              <Button secondary onClick={() => setItems((i) => [...i, { id: crypto.randomUUID(), name: "New item", priceCents: 0 }])}>
+                Add item
+              </Button>
+            </>
+          ) : null
         }
       >
+        {startMode === "choice" && (
+          <Card>
+            <Label>CHOOSE HOW TO START</Label>
+            <div className="flex flex-col gap-3 py-4">
+              <button type="button" onClick={() => setStartMode("camera")} className="rounded-xl bg-[#0B3FA8] px-4 py-4 text-base font-semibold text-white">
+                Scan receipt
+              </button>
+              <button type="button" onClick={() => setStartMode("manual")} className="rounded-xl border border-[#0B3FA8] px-4 py-4 text-base font-semibold text-[#0B3FA8]">
+                No receipt — enter manually
+              </button>
+            </div>
+          </Card>
+        )}
+        {(startMode === "camera" || receiptImageUrl) && (
+        <Card>
+          <Label>START HERE</Label>
+          {receiptImageUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={receiptImageUrl} alt="Receipt preview" className="mt-2 max-h-64 w-full rounded-xl object-contain" />
+          ) : cameraError ? (
+            <p className="m-0 mt-2 text-sm text-slate-600">{cameraError}</p>
+          ) : (
+            <video ref={videoRef} autoPlay muted playsInline className="mt-2 aspect-[4/3] w-full rounded-xl bg-slate-900 object-cover" />
+          )}
+          <div className="mt-3 flex gap-2">
+            {receiptImageUrl ? (
+              <button type="button" onClick={retakeReceipt} className="flex-1 rounded-xl border border-[#0B3FA8] px-3 py-3 text-sm font-semibold text-[#0B3FA8]">
+                Retake photo
+              </button>
+            ) : (
+              <button type="button" onClick={captureReceipt} disabled={!!cameraError} className="flex-1 rounded-xl bg-[#0B3FA8] px-3 py-3 text-sm font-semibold text-white disabled:opacity-50">
+                Capture receipt
+              </button>
+            )}
+            <label htmlFor="receipt-image" className="cursor-pointer rounded-xl border border-slate-300 px-3 py-3 text-sm font-semibold text-slate-700">
+              Upload
+            </label>
+          </div>
+          <input id="receipt-image" type="file" accept="image/*" capture="environment" className="sr-only" onChange={(event) => handleReceiptImage(event.target.files?.[0])} />
+        </Card>
+        )}
+        {(startMode === "manual" || receiptImageUrl) && (
+          <>
         <Card>
           {items.map((it) => (
             <div key={it.id} className="flex items-center justify-between gap-2 border-b border-slate-200 py-2.5 last:border-b-0">
@@ -214,6 +319,8 @@ export default function SplitFlow() {
             <Chip tone="amber">Doesn’t match receipt total of {fmt(RECEIPT_TOTAL)}</Chip>
           )}
         </div>
+          </>
+        )}
       </Screen>
     );
 
